@@ -31,18 +31,19 @@ model User {
 }
 
 model Document {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   userId     String
   title      String
   filename   String?
   content    String
-  status     String   @default("pending") // pending | processing | ready | failed
-  chunkCount Int      @default(0)
+  status     String    @default("pending") // pending | processing | ready | failed
+  chunkCount Int       @default(0)
   error      String? // Last processing error (set when status = failed)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   chunks     Chunk[]
+  messages   Message[]
 
   @@index([userId])
   @@index([status])
@@ -51,41 +52,52 @@ model Document {
 
 // A piece of a document, created by the document-processing worker.
 model Chunk {
-  id         String   @id @default(cuid())
+  id         String                       @id @default(cuid())
   documentId String
   index      Int // Position within the document (0-based)
   content    String
   tokenCount Int
-  // pgvector column (text-embedding-3-small = 1536 dims). Prisma can't read or
-  // write this type, so embedding.service.ts accesses it with raw SQL.
+  // mxbai-embed-large-v1 embeddings (1024 dims). Prisma can't read or
+  // write this type, so embedding.service.ts uses raw SQL.
   // Its HNSW index (Chunk_embedding_idx) is created by raw-SQL migration and
   // `migrate dev` will try to drop it: always use --create-only and remove
   // any DROP INDEX "Chunk_embedding_idx" before applying.
-  embedding  Unsupported("vector(1536)")?
-  createdAt  DateTime @default(now())
-  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  embedding  Unsupported("vector(1024)")?
+  createdAt  DateTime                     @default(now())
+  document   Document                     @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@index([documentId])
 }
 
 model Message {
-  id        String   @id @default(cuid())
-  userId    String
-  role      String
-  content   String
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id               String        @id @default(cuid())
+  userId           String
+  conversationId   String?
+  documentId       String? // Set when the question was scoped to one document
+  role             String // "user" | "assistant"
+  content          String
+  // Assistant messages only: LLM usage and RAG details (model, citations)
+  promptTokens     Int?
+  completionTokens Int?
+  costUsd          Decimal?      @db.Decimal(10, 6)
+  metadata         Json?
+  createdAt        DateTime      @default(now())
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation     Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  document         Document?     @relation(fields: [documentId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
+  @@index([conversationId, createdAt])
 }
 
 model Conversation {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
   title     String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  Message[]
 
   @@index([userId])
 }

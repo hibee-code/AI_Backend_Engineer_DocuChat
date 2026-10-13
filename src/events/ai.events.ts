@@ -3,29 +3,31 @@ import { appEvents } from '../lib/events';
 import { logger, serializeError } from '../lib/logger';
 import { AI_EVENTS } from './ai.types';
 
-// Record every embedding call in UsageLog. This table feeds the cost
-// tracking dashboard.
-appEvents.on(AI_EVENTS.EMBEDDING_GENERATED, async (data) => {
+// Record every paid AI call (Claude answers) in UsageLog. This table feeds the
+// cost tracking dashboard. Embeddings run locally for free, so they aren't logged.
+
+appEvents.on(AI_EVENTS.CHAT_COMPLETED, async (data) => {
   try {
     await prisma.usageLog.create({
       data: {
         userId: data.userId,
-        action: 'embedding',
-        tokens: data.tokensUsed,
+        action: 'chat',
+        tokens: data.promptTokens + data.completionTokens,
         costUsd: data.costUsd,
         metadata: {
           model: data.model,
-          documentId: data.documentId,
-          cached: data.cached,
+          conversationId: data.conversationId,
+          promptTokens: data.promptTokens,
+          completionTokens: data.completionTokens,
         },
       },
     });
   } catch (error) {
     // Log but don't crash. Usage tracking is a side effect.
-    logger.error('Failed to record embedding usage', {
+    logger.error('Failed to record chat usage', {
       correlationId: data.correlationId,
       userId: data.userId,
-      documentId: data.documentId,
+      conversationId: data.conversationId,
       error: serializeError(error),
     });
   }

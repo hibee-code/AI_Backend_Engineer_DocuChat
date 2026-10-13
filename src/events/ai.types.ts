@@ -2,20 +2,20 @@
 // this file without a circular import (same pattern as auth.types.ts).
 
 export const AI_EVENTS = {
-  EMBEDDING_GENERATED: 'ai:embedding-generated',
+  CHAT_COMPLETED: 'ai:chat-completed',
 } as const;
 
-export interface EmbeddingGeneratedEvent {
-  correlationId?: string;
-  userId?: string;
-  documentId?: string;
+export interface ChatCompletedEvent {
+  correlationId: string;
+  userId: string;
+  conversationId: string;
   model: string;
-  tokensUsed: number;
+  promptTokens: number;
+  completionTokens: number;
   costUsd: number;
-  cached: boolean;
 }
 
 // Event name -> listener arguments. Used to type `appEvents`.
 export type AiEventMap = {
-  [AI_EVENTS.EMBEDDING_GENERATED]: [EmbeddingGeneratedEvent];
+  [AI_EVENTS.CHAT_COMPLETED]: [ChatCompletedEvent];
 };

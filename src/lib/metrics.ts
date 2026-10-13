@@ -41,5 +41,26 @@ export const cacheOperations = new client.Counter({
   labelNames: ['operation', 'result'], // get/set, hit/miss
 });
 
+// Histogram: iterations per agent run
+export const agentIterations = new client.Histogram({
+  name: 'docuchat_agent_iterations',
+  help: 'Number of iterations per agent run',
+  buckets: [1, 2, 3, 5, 7, 10],
+});
+
+// Histogram: cost per agent run
+export const agentCost = new client.Histogram({
+  name: 'docuchat_agent_cost_usd',
+  help: 'Cost per agent run in USD',
+  buckets: [0.01, 0.05, 0.1, 0.25, 0.5],
+});
+
+// Counter: why agent runs stopped (answer found, max iterations, budget, ...)
+export const agentTerminations = new client.Counter({
+  name: 'docuchat_agent_terminations_total',
+  help: 'Agent termination reasons',
+  labelNames: ['reason'],
+});
+
 // Export the registry for the /metrics endpoint
 export const metricsRegistry = client.register;

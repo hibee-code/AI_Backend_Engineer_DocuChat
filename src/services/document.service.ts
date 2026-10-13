@@ -10,13 +10,14 @@ export async function createDocument(data: {
   content: string;
   userId: string;
   correlationId: string;
+  filename?: string; // Set for file uploads; its extension decides how text is extracted
 }) {
   // Create the document with pending status
   const doc = await prisma.document.create({
     data: {
       userId: data.userId,
       title: data.title,
-      filename: data.title.toLowerCase().replace(/\s+/g, '-'),
+      filename: data.filename ?? data.title.toLowerCase().replace(/\s+/g, '-'),
       content: data.content,
       status: 'pending',
     },

@@ -20,3 +20,10 @@ export const documentParamsSchema = z.object({
         id: z.cuid('Invalid document ID'),
     }),
 });
+
+// Multipart upload: the file itself is checked by the upload middleware
+export const uploadDocumentSchema = z.object({
+    body: z.object({
+        title: z.string().trim().min(1).max(500).optional(),
+    }),
+});

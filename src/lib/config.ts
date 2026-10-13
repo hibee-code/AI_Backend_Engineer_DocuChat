@@ -25,8 +25,14 @@ const envSchema = z.object({
   REFRESH_TOKEN_EXPIRES_IN: z.string().default('7d'),
   BCRYPT_SALT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
 
-  // OpenAI (needed from Week 4 onward)
-  OPENAI_API_KEY: z.string().optional(),
+  // Local embedding model (Hugging Face ID). Must output 1024-dim vectors to
+  // match the Chunk.embedding column.
+  EMBEDDING_MODEL_ID: z.string().min(1).default('mixedbread-ai/mxbai-embed-large-v1'),
+
+  // Anthropic: chat answers (RAG). Only models with pricing and request
+  // settings in rag.service.ts (CHAT_MODELS) are accepted.
+  ANTHROPIC_API_KEY: z.string().min(1, 'ANTHROPIC_API_KEY is required'),
+  CLAUDE_MODEL: z.enum(['claude-haiku-4-5', 'claude-sonnet-5-5']).default('claude-haiku-4-5'),
 
   // Redis (needed from Week 3 onward)
   REDIS_URL: z.string().optional(),
@@ -48,4 +54,4 @@ export const config = parsed.data;
 // config.PORT           -> number (not string!)
 // config.NODE_ENV       -> 'development' | 'production' | 'test'
 // config.JWT_ACCESS_SECRET -> string (guaranteed at least 32 chars)
-// config.OPENAI_API_KEY -> string | undefined
+// config.CLAUDE_MODEL   -> 'claude-haiku-4-5' | 'claude-sonnet-5-5'

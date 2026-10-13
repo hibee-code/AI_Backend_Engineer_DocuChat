@@ -5,3 +5,6 @@ src/generated/
 .env
 *.log
 node_modules
+
+# Downloaded embedding model files
+.cache/

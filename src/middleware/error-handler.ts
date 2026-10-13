@@ -21,7 +21,7 @@ function scrubSensitiveData(data: any): any {
 
   const patterns = [
     /Bearer [A-Za-z0-9\-._~+/]+=*/g, // JWT tokens
-    /sk-[A-Za-z0-9]{20,}/g, // OpenAI keys
+    /sk-ant-[A-Za-z0-9_-]{20,}/g, // Anthropic (Claude) API keys
     /password["']?\s*[:=]\s*["']?[^"'\s,}]+/gi, // password in any format
   ];
 

@@ -92,10 +92,7 @@ const worker = new Worker(
 
       // Step 5: Generate embeddings (the expensive step).
       // embeddings[i] belongs to chunks[i], and chunks[i].index === i.
-      const embeddings = await generateEmbeddingsBatchCached(
-        chunks.map((c) => c.text),
-        { correlationId, userId, documentId },
-      );
+      const embeddings = await generateEmbeddingsBatchCached(chunks.map((c) => c.text));
       await job.updateProgress(85);
 
       // Step 6: Store embeddings, matched to each row by its chunk index

@@ -9,13 +9,15 @@ import './events/auth.events';
 import adminRoutes from './routes/admin';
 import authRoutes from './routes/auth';
 import documentRoutes from './routes/documents';
+import conversationRoutes from './routes/conversations';
+import agentRoutes from './routes/agent';
 import healthRoutes from './routes/health';
-import './queues/document.worker';
 import { bullBoardAdapter } from './config/bull-board';
 import { verifyWebhookSignature } from './middleware/verifyWebhook';
 import './events/cache.events';
 import './events/security.events';
 import './events/ai.events';
+import './events/agent.events';
 import { sanitizeInput } from './middleware/sanitize';
 import { requestLogger } from './middleware/requestLogger';
 import { metricsRegistry } from './lib/metrics';
@@ -105,8 +107,8 @@ app.use(sanitizeInput); // Sanitize before anything else sees the data
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/documents', documentRoutes);
 app.use('/api/v1/admin', adminRoutes);
-// TODO: mount once src/routes/conversations.ts exists
-// app.use('/api/v1/conversations', conversationRoutes);
+app.use('/api/v1/conversations', conversationRoutes);
+app.use('/api/v1/agent', agentRoutes);
 
 // When v2 exists:
 // app.use('/api/v2/documents', documentRoutesV2);

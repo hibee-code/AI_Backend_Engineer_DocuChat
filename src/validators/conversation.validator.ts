@@ -19,3 +19,9 @@ export const sendMessageSchema = z.object({
         documentId: z.cuid().optional(),
     }),
 });
+
+export const conversationParamsSchema = z.object({
+    params: z.object({
+        id: z.cuid('Invalid conversation ID'),
+    }),
+});
