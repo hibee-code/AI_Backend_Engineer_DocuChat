@@ -1,10 +1,14 @@
 import { z } from 'zod';
 
-export interface ToolDefinition {
+// S is the tool's Zod schema: handler params are typed from it. The executor
+// validates input with `parameters` before calling the handler.
+export interface ToolDefinition<S extends z.ZodType = z.ZodType> {
   name: string;
   description: string;
-  parameters: z.ZodSchema;
-  handler: (params: any, context: ToolContext) => Promise<ToolResult>;
+  parameters: S;
+  // Method syntax on purpose: it lets a ToolDefinition<SpecificSchema> sit in
+  // the registry's Record<string, ToolDefinition>
+  handler(params: z.infer<S>, context: ToolContext): Promise<ToolResult>;
 }
 
 export interface ToolContext {

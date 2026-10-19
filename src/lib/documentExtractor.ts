@@ -35,13 +35,14 @@ export async function extractText(
       return {
         text: typeof content === 'string' ? content : content.toString('utf-8'),
       };
-    case 'markdown':
+    case 'markdown': {
       // Strip markdown formatting, keep the text
       const raw = typeof content === 'string' ? content : content.toString('utf-8');
       return {
         text: stripMarkdown(raw),
       };
-    case 'pdf':
+    }
+    case 'pdf': {
       const buffer = typeof content === 'string' ? Buffer.from(content, 'base64') : content;
       const parser = new PDFParse({ data: buffer });
       const parsed = await parser.getText();
@@ -50,6 +51,7 @@ export async function extractText(
         text: cleanExtractedText(parsed.text),
         pageCount: parsed.total,
       };
+    }
     default:
       throw new Error(`Unsupported format: ${format}`);
   }
@@ -61,7 +63,7 @@ function stripMarkdown(text: string): string {
     .replace(/\*{1,3}(.*?)\*{1,3}/g, '$1') // Bold/italic
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Links
     .replace(/`{1,3}[^`]*`{1,3}/g, '') // Code blocks
-    .replace(/^[\-*+]\s+/gm, '') // List markers
+    .replace(/^[-*+]\s+/gm, '') // List markers
     .trim();
 }
 

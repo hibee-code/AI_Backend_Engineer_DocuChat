@@ -185,3 +185,42 @@ model WebhookEvent {
   processedAt DateTime?
   payload     String // Raw payload for debugging
 }
+
+model PromptTemplate {
+  id        String   @id @default(uuid())
+  taskType  String // 'chat', 'agent', 'summary'
+  version   String // 'v1', 'v2', 'v3'
+  name      String // Human-readable name
+  content   String // The actual prompt text
+  isActive  Boolean  @default(false)
+  metadata  String? // JSON: notes, author, changelog
+  createdAt DateTime @default(now())
+
+  @@unique([taskType, version])
+  @@index([taskType, isActive])
+}
+
+// One row per AI call made through mcp.service.ts (mcpComplete).
+// No relation to User on purpose: the audit trail outlives deleted users.
+model AIAuditLog {
+  id            String   @id @default(uuid())
+  userId        String
+  correlationId String
+  taskType      String // 'chat', 'agent', 'summary'
+  model         String
+  promptVersion String
+  inputTokens   Int
+  outputTokens  Int
+  costUsd       Decimal  @db.Decimal(10, 6) // Decimal like UsageLog: money in Float drifts
+  latencyMs     Int
+  fallbackUsed  Boolean  @default(false)
+  // Store input/output as text, NOT in metadata JSON
+  // This allows searching and analysis
+  inputSummary  String // First 500 chars of the prompt (not full PII)
+  outputSummary String // First 500 chars of the response
+  createdAt     DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([taskType, createdAt])
+  @@index([model, createdAt])
+}

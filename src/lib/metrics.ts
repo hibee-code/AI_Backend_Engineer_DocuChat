@@ -62,5 +62,21 @@ export const agentTerminations = new client.Counter({
   labelNames: ['reason'],
 });
 
+// Counter: MCP tool calls. source: 'inbound' = a client called our /mcp server,
+// 'outbound' = our agent called a tool on an external MCP server.
+export const mcpToolCalls = new client.Counter({
+  name: 'docuchat_mcp_tool_calls_total',
+  help: 'MCP tool calls',
+  labelNames: ['tool', 'source', 'status'], // status: success | error
+});
+
+// Histogram: MCP tool call duration
+export const mcpToolDuration = new client.Histogram({
+  name: 'docuchat_mcp_tool_duration_seconds',
+  help: 'MCP tool call duration in seconds',
+  labelNames: ['tool', 'source'],
+  buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+});
+
 // Export the registry for the /metrics endpoint
 export const metricsRegistry = client.register;

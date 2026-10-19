@@ -1,12 +1,8 @@
-import type Anthropic from '@anthropic-ai/sdk';
-import { claudeBreaker } from '../lib/http/claude.breaker';
-import { config } from '../lib/config';
-import { calculateCostUsd, getModelProfile } from '../lib/claudeModels';
-import { RAG_SYSTEM_PROMPT } from '../config/prompts';
 import { logger } from '../lib/logger';
 import { appEvents } from '../lib/events';
 import { AI_EVENTS } from '../events/ai.types';
 import type { SearchResult } from './search.service';
+import { mcpComplete } from './mcp.service';
 
 // A type alias (not an interface) so citations can be stored in a Prisma Json column
 export type Citation = {
@@ -92,12 +88,10 @@ export interface RAGResponse {
   model: string;
 }
 
-const MAX_ANSWER_TOKENS = 1500;
+type ChatTurn = { role: 'user' | 'assistant'; content: string };
 
 // Last 5 Q&A pairs (each pair is a user and an assistant message)
 const HISTORY_MESSAGE_LIMIT = 10;
-
-const REFUSAL_ANSWER = "I can't help with that request.";
 
 export async function generateRAGResponse(options: {
   question: string;
@@ -109,53 +103,34 @@ export async function generateRAGResponse(options: {
 }): Promise<RAGResponse> {
   const { question, context, conversationHistory = [], userId, conversationId, correlationId } =
     options;
-  const model = config.CLAUDE_MODEL;
-  const { settings } = getModelProfile(model);
-
-  // Claude takes the system prompt separately; messages hold only the
-  // conversation, which must start with a user turn
-  const messages: Anthropic.MessageParam[] = [
+  // The conversation must start with a user turn. The system prompt, model,
+  // budget, fallback and cost are handled by mcpComplete.
+  const messages: { role: string; content: string }[] = [
     ...toClaudeHistory(conversationHistory),
     { role: 'user', content: buildUserMessage(question, context) },
   ];
 
   const startTime = Date.now();
 
-  // Call Claude through the circuit breaker
-  const response = await claudeBreaker.fire({
-    model,
-    max_tokens: MAX_ANSWER_TOKENS,
-    system: RAG_SYSTEM_PROMPT,
+  // Call the LLM through MCP
+  const response = await mcpComplete({
+    taskType: 'chat',
     messages,
-    ...settings,
+    userId,
+    correlationId,
+    temperature: 0.1,
+    auditInput: question, // Audit the question, not the document chunks before it
   });
 
-  const { input_tokens, output_tokens } = response.usage;
-  const costUsd = calculateCostUsd(model, response.usage);
-
-  // Claude returns content blocks; the answer is the text ones joined. A
-  // refusal carries no usable text, so give the user a clear message instead.
-  const answer =
-    response.stop_reason === 'refusal'
-      ? REFUSAL_ANSWER
-      : response.content
-          .filter((block) => block.type === 'text')
-          .map((block) => block.text)
-          .join('');
-
-  if (response.stop_reason === 'refusal' || response.stop_reason === 'max_tokens') {
-    logger.warn('RAG response incomplete', {
-      correlationId,
-      conversationId,
-      model,
-      stopReason: response.stop_reason,
-    });
-  }
+  const { model, costUsd } = response;
+  const { prompt: input_tokens, completion: output_tokens } = response.tokensUsed;
 
   logger.info('RAG response generated', {
     correlationId,
     conversationId,
     model,
+    promptVersion: response.promptVersion,
+    fallbackUsed: response.fallbackUsed,
     contextChunks: context.chunks.length,
     promptTokens: input_tokens,
     completionTokens: output_tokens,
@@ -175,13 +150,9 @@ export async function generateRAGResponse(options: {
   });
 
   return {
-    answer,
+    answer: response.content,
     citations: context.citations,
-    tokensUsed: {
-      prompt: input_tokens,
-      completion: output_tokens,
-      total: input_tokens + output_tokens, // Claude doesn't return a total
-    },
+    tokensUsed: response.tokensUsed,
     costUsd,
     model,
   };
@@ -190,12 +161,10 @@ export async function generateRAGResponse(options: {
 // Keeps the last HISTORY_MESSAGE_LIMIT user/assistant messages, dropping
 // leading assistant turns: Claude requires the conversation to start with a
 // user message (the window can begin mid-exchange).
-function toClaudeHistory(history: { role: string; content: string }[]): Anthropic.MessageParam[] {
+function toClaudeHistory(history: { role: string; content: string }[]): ChatTurn[] {
   const recent = history
     .slice(-HISTORY_MESSAGE_LIMIT)
-    .filter((m): m is Anthropic.MessageParam & { content: string } =>
-      m.role === 'user' || m.role === 'assistant',
-    );
+    .filter((m): m is ChatTurn => m.role === 'user' || m.role === 'assistant');
   const firstUser = recent.findIndex((m) => m.role === 'user');
   return firstUser === -1 ? [] : recent.slice(firstUser);
 }

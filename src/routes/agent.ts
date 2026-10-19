@@ -43,7 +43,7 @@ const researchSchema = z.object({
  *       400:
  *         description: Validation error
  *       429:
- *         description: Too many queries
+ *         description: Too many queries, or monthly AI budget used up (code BUDGET_EXHAUSTED)
  */
 // Express 5 forwards rejected promises to the error handler, so no try/catch needed.
 router.post(

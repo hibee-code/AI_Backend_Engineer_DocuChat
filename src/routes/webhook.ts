@@ -1,5 +1,7 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { verifyWebhookSignature } from '../middleware/verifyWebhook';
+import { config } from '../lib/config';
 import { prisma } from '../lib/prisma';
 import { logger, serializeError } from '../lib/logger';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- used once 'document.imported' is implemented
@@ -7,13 +9,32 @@ import { documentQueue } from '../queues/document.queue';
 
 const router = Router();
 
+// Minimum shape every event needs (id for idempotency, type for routing)
+const webhookEventSchema = z.looseObject({
+  id: z.string().min(1).max(255),
+  type: z.string().min(1).max(255),
+});
+type WebhookEventBody = z.infer<typeof webhookEventSchema>;
+
+// Mounted at /webhooks with express.raw() in app.ts, so the signature is
+// checked against the exact bytes the provider signed.
 router.post(
   '/example',
-  verifyWebhookSignature(process.env.EXAMPLE_WEBHOOK_SECRET!, 'X-Webhook-Signature'),
+  verifyWebhookSignature(config.WEBHOOK_SECRET, 'X-Webhook-Signature'),
   async (req, res) => {
-    // Body is still raw bytes here — parse it manually
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const event = JSON.parse((req as any).rawBody.toString());
+    // Body is still raw bytes here — parse it manually. The signature is
+    // valid, but the payload can still be malformed: 400, not a 500.
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(req.rawBody!.toString('utf-8'));
+    } catch {
+      return res.status(400).json({ error: 'Body must be valid JSON' });
+    }
+    const validation = webhookEventSchema.safeParse(parsed);
+    if (!validation.success) {
+      return res.status(400).json({ error: 'Event must have string "id" and "type" fields' });
+    }
+    const event = validation.data;
 
     // Idempotency check
     const existing = await prisma.webhookEvent.findUnique({
@@ -59,8 +80,7 @@ router.post(
   },
 );
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function processWebhookEvent(event: any, correlationId: string) {
+async function processWebhookEvent(event: WebhookEventBody, correlationId: string) {
   // Route to the right handler based on event type
   switch (event.type) {
     case 'document.imported':

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import IORedis from 'ioredis';
 import { config } from './config';
+import { logger } from './logger';
 
 // Dedicated cache connection, separate from BullMQ's (queues/connection.ts).
 // BullMQ needs maxRetriesPerRequest: null (wait forever); a cache should fail
@@ -20,6 +21,22 @@ export const CACHE_TTL = {
   RAG_RESULT: 3600, // 1 hour
 } as const;
 
+// The cache is an optimisation, so reads and writes fail open: if Redis is
+// down, a read is a miss and a write is skipped, and callers fall through to
+// the database. Deletes (cache invalidation) still throw, so a failed
+// invalidation is never silently ignored.
+async function failOpen<T>(operation: string, fallback: T, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    logger.warn('Cache unavailable, continuing without it', {
+      operation,
+      error: (error as Error).message,
+    });
+    return fallback;
+  }
+}
+
 function parseCached<T>(raw: string | null): T | null {
   if (!raw) return null;
 
@@ -31,14 +48,16 @@ function parseCached<T>(raw: string | null): T | null {
 }
 
 export async function cacheGet<T>(key: string): Promise<T | null> {
-  return parseCached<T>(await cacheRedis.get(key));
+  return failOpen('get', null, async () => parseCached<T>(await cacheRedis.get(key)));
 }
 
 // One round trip for many keys. Results line up with `keys`; misses are null.
 export async function cacheGetMany<T>(keys: string[]): Promise<(T | null)[]> {
   if (keys.length === 0) return [];
-  const raws = await cacheRedis.mget(...keys);
-  return raws.map((raw) => parseCached<T>(raw));
+  return failOpen('mget', keys.map(() => null), async () => {
+    const raws = await cacheRedis.mget(...keys);
+    return raws.map((raw) => parseCached<T>(raw));
+  });
 }
 
 export async function cacheSet(
@@ -47,7 +66,9 @@ export async function cacheSet(
   value: any,
   ttlSeconds: number,
 ): Promise<void> {
-  await cacheRedis.set(key, JSON.stringify(value), 'EX', ttlSeconds);
+  await failOpen('set', undefined, async () => {
+    await cacheRedis.set(key, JSON.stringify(value), 'EX', ttlSeconds);
+  });
 }
 
 // One round trip for many writes
@@ -56,11 +77,13 @@ export async function cacheSetMany(
   ttlSeconds: number,
 ): Promise<void> {
   if (entries.length === 0) return;
-  const pipeline = cacheRedis.pipeline();
-  for (const { key, value } of entries) {
-    pipeline.set(key, JSON.stringify(value), 'EX', ttlSeconds);
-  }
-  await pipeline.exec();
+  await failOpen('mset', undefined, async () => {
+    const pipeline = cacheRedis.pipeline();
+    for (const { key, value } of entries) {
+      pipeline.set(key, JSON.stringify(value), 'EX', ttlSeconds);
+    }
+    await pipeline.exec();
+  });
 }
 
 export async function cacheDel(key: string): Promise<void> {
@@ -97,13 +120,18 @@ export async function cacheGetOrSet<T>(
 
   // 2. Try to acquire lock
   const lockKey = `lock:${key}`;
-  const acquired = await cacheRedis.set(
-    lockKey,
-    '1',
-    'EX',
-    5,
-    'NX', // Expires in 5s, only if not exists
+  const acquired = await failOpen('lock', 'UNAVAILABLE' as const, () =>
+    cacheRedis.set(
+      lockKey,
+      '1',
+      'EX',
+      5,
+      'NX', // Expires in 5s, only if not exists
+    ),
   );
+
+  // Redis is down: no cache and no lock, so just fetch
+  if (acquired === 'UNAVAILABLE') return fetchFn();
 
   if (acquired) {
     // We got the lock. Fetch and cache.
@@ -112,7 +140,9 @@ export async function cacheGetOrSet<T>(
       await cacheSet(key, value, ttlSeconds);
       return value;
     } finally {
-      await cacheRedis.del(lockKey);
+      await failOpen('unlock', undefined, async () => {
+        await cacheRedis.del(lockKey);
+      });
     }
   }
 

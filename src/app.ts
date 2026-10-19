@@ -12,8 +12,8 @@ import documentRoutes from './routes/documents';
 import conversationRoutes from './routes/conversations';
 import agentRoutes from './routes/agent';
 import healthRoutes from './routes/health';
+import webhookRoutes from './routes/webhook';
 import { bullBoardAdapter } from './config/bull-board';
-import { verifyWebhookSignature } from './middleware/verifyWebhook';
 import './events/cache.events';
 import './events/security.events';
 import './events/ai.events';
@@ -22,6 +22,7 @@ import { sanitizeInput } from './middleware/sanitize';
 import { requestLogger } from './middleware/requestLogger';
 import { metricsRegistry } from './lib/metrics';
 import { metricsMiddleware } from './middleware/metricsMiddleware';
+import { mountMCPTransport } from './mcp/transport';
 
 
 
@@ -49,20 +50,24 @@ app.use(helmet({
 app.use(requestLogger);
 app.use(metricsMiddleware); // Request count + latency for Prometheus
 app.use(cors()); // Cross-origin requests
-app.use(express.json()); // Parse JSON request bodies
-app.use(healthRoutes);
-// Capture raw body for webhook routes BEFORE express.json()
-const secret = process.env.WEBHOOK_SECRET ?? '';
+
+// Webhooks: mounted BEFORE express.json(). Signatures are computed over the
+// exact bytes sent, so the body must stay raw; once express.json() has read
+// the stream there is nothing left to verify. Each route checks its signature.
 app.use(
   '/webhooks',
-  verifyWebhookSignature(secret, 'x-signature'),
   express.raw({
     type: 'application/json',
-    verify: (req: any, res, buf) => {
-      req.rawBody = buf;
+    limit: '1mb',
+    verify: (req, _res, buf) => {
+      Object.assign(req, { rawBody: buf });
     },
   }),
+  webhookRoutes,
 );
+
+app.use(express.json()); // Parse JSON request bodies (everything except /webhooks)
+app.use(healthRoutes);
 
 app.use('/api-docs', helmet({
   contentSecurityPolicy: {
@@ -101,7 +106,6 @@ app.get('/metrics', async (req, res) => {
   res.send(await metricsRegistry.metrics());
 });
 
-app.use(express.json());
 app.use(sanitizeInput); // Sanitize before anything else sees the data
 // === API v1 ===
 app.use('/api/v1/auth', authRoutes);
@@ -110,13 +114,13 @@ app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/conversations', conversationRoutes);
 app.use('/api/v1/agent', agentRoutes);
 
+// Mount MCP endpoint (Model Context Protocol, for Claude Desktop/Code etc.)
+mountMCPTransport(app);
+
 // When v2 exists:
 // app.use('/api/v2/documents', documentRoutesV2);
 
 // === ERROR HANDLER (must be last middleware) ===
 app.use(errorHandler);
-
-// Then parse JSON for everything else
-app.use(express.json());
 
 export { app };

@@ -6,13 +6,15 @@ import type { ToolDefinition } from '.';
 // context one search adds to every following model call.
 const TOP_K = 5;
 
-export const searchDocumentsTool: ToolDefinition = {
+const parameters = z.object({
+  query: z.string().trim().min(1).max(500).describe('What to search for, in natural language'),
+});
+
+export const searchDocumentsTool: ToolDefinition<typeof parameters> = {
   name: 'search_documents',
   description:
     "Search the user's uploaded documents for passages relevant to a query. Returns the most relevant passages with their document titles and relevance scores (0 to 1). Use a focused query; rephrase and search again if the results don't answer the question.",
-  parameters: z.object({
-    query: z.string().trim().min(1).max(500).describe('What to search for, in natural language'),
-  }),
+  parameters,
   handler: async ({ query }, { userId, correlationId }) => {
     const results = await semanticSearch({ query, userId, correlationId, topK: TOP_K });
     return {

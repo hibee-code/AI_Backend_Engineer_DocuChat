@@ -1,6 +1,16 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      // Set by attachFingerprint
+      fingerprint?: string;
+    }
+  }
+}
+
 
 export function attachFingerprint(
     req: Request, res: Response, next: NextFunction
@@ -16,6 +26,6 @@ export function attachFingerprint(
     .update(signals.join('|'))
     .digest('hex')
     .substring(0, 16);
-    (req as any).fingerprint = fingerprint;
+    req.fingerprint = fingerprint;
     next();
 }
