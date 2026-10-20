@@ -4,6 +4,7 @@ import { ExpressAdapter } from '@bull-board/express';
 import { documentQueue } from '../queues/document.queue';
 import { deadLetterQueue } from '../queues/dead-letter.queue';
 import { maintenanceQueue } from '../queues/maintenance.queue';
+import { escalationQueue } from '../queues/escalation.queue';
 
 
 
@@ -14,6 +15,7 @@ createBullBoard({
         new BullMQAdapter(documentQueue),
         new BullMQAdapter(deadLetterQueue),
         new BullMQAdapter(maintenanceQueue),
+        new BullMQAdapter(escalationQueue),
     ],
     serverAdapter,
 });

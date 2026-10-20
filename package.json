@@ -19,6 +19,7 @@
     "db:studio": "prisma studio",
     "postinstall": "prisma generate",
     "worker": "tsx watch src/worker.ts",
+    "mcp:check": "LOG_LEVEL=warn tsx src/scripts/mcp-check.ts",
     "worker:start": "node dist/worker.js"
   },
   "repository": {

@@ -20,7 +20,12 @@ type WebhookEventBody = z.infer<typeof webhookEventSchema>;
 // checked against the exact bytes the provider signed.
 router.post(
   '/example',
-  verifyWebhookSignature(config.WEBHOOK_SECRET, 'X-Webhook-Signature'),
+  // Signatures expire after 5 minutes (see verifyWebhook.ts)
+  verifyWebhookSignature(config.WEBHOOK_SECRET, {
+    signatureHeader: 'X-Webhook-Signature',
+    timestampHeader: 'X-Webhook-Timestamp',
+    toleranceSeconds: 5 * 60,
+  }),
   async (req, res) => {
     // Body is still raw bytes here — parse it manually. The signature is
     // valid, but the payload can still be malformed: 400, not a 500.

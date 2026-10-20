@@ -50,6 +50,12 @@ async function seedRBAC() {
       action: 'manage',
       description: 'Manage roles and permissions',
     },
+    {
+      name: 'reviews:manage',
+      resource: 'reviews',
+      action: 'manage',
+      description: 'Review low-confidence AI answers (human-in-the-loop)',
+    },
   ];
 
   // Upsert all permissions
@@ -86,6 +92,12 @@ async function seedRBAC() {
       description: 'Read-only access',
       permissions: ['documents:read', 'conversations:read'],
     },
+    {
+      // Domain experts / support staff: review answers without being admins
+      name: 'reviewer',
+      description: 'Reviews low-confidence AI answers',
+      permissions: ['reviews:manage', 'documents:read', 'conversations:read'],
+    },
   ];
 
   for (const roleDef of roleDefs) {
@@ -117,7 +129,7 @@ async function seedRBAC() {
     }
   }
 
-  logger.info('RBAC seeded', { roles: 3, permissions: 9 });
+  logger.info('RBAC seeded', { roles: roleDefs.length, permissions: permissionDefs.length });
 }
 
 // From your current prompts.ts

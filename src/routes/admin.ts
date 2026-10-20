@@ -72,4 +72,45 @@ router.post(
   adminController.activatePrompt,
 );
 
+/**
+ * @swagger
+ * /admin/reviews/metrics:
+ *   get:
+ *     summary: Human-in-the-loop review metrics (admin)
+ *     description: >
+ *       Review queue counts, average turnaround and rates (approval, edit,
+ *       SLA compliance, escalation) for the period. Rates are whole percentages.
+ *       `pending` is the current backlog, not limited to the period.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: period
+ *         schema:
+ *           type: string
+ *           default: 24h
+ *           example: 7d
+ *         description: Number followed by h (hours) or d (days), from 1h to 365d
+ *     responses:
+ *       200:
+ *         description: Review metrics
+ *         content:
+ *           application/json:
+ *             example:
+ *               period: 7d
+ *               queue: { total: 6, pending: 1, approved: 3, rejected: 1, escalated: 1 }
+ *               turnaround: { avgMinutes: 45 }
+ *               rates: { approvalRate: 75, editRate: 33, slaCompliance: 67, escalationRate: 17 }
+ *       400:
+ *         description: Invalid period
+ *       403:
+ *         description: Not an admin
+ */
+router.get(
+  '/reviews/metrics',
+  validate(adminController.reviewMetricsSchema),
+  adminController.reviewMetrics,
+);
+
 export default router;

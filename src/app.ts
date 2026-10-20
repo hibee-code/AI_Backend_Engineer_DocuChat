@@ -11,6 +11,7 @@ import authRoutes from './routes/auth';
 import documentRoutes from './routes/documents';
 import conversationRoutes from './routes/conversations';
 import agentRoutes from './routes/agent';
+import reviewRoutes from './routes/reviews';
 import healthRoutes from './routes/health';
 import webhookRoutes from './routes/webhook';
 import { bullBoardAdapter } from './config/bull-board';
@@ -113,6 +114,7 @@ app.use('/api/v1/documents', documentRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/conversations', conversationRoutes);
 app.use('/api/v1/agent', agentRoutes);
+app.use('/api/v1/reviews', reviewRoutes); // Human-in-the-loop reviewers
 
 // Mount MCP endpoint (Model Context Protocol, for Claude Desktop/Code etc.)
 mountMCPTransport(app);

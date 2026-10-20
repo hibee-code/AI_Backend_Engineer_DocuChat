@@ -28,22 +28,24 @@ model User {
   usageLogs     UsageLog[]
   refreshTokens RefreshToken[]
   roles         UserRole[]
+  reviewsDone   ReviewQueue[] // Review items this user reviewed (as a reviewer)
 }
 
 model Document {
-  id         String    @id @default(cuid())
+  id         String        @id @default(cuid())
   userId     String
   title      String
   filename   String?
   content    String
-  status     String    @default("pending") // pending | processing | ready | failed
-  chunkCount Int       @default(0)
+  status     String        @default("pending") // pending | processing | ready | failed
+  chunkCount Int           @default(0)
   error      String? // Last processing error (set when status = failed)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   chunks     Chunk[]
   messages   Message[]
+  reviews    ReviewQueue[]
 
   @@index([userId])
   @@index([status])
@@ -81,10 +83,13 @@ model Message {
   completionTokens Int?
   costUsd          Decimal?      @db.Decimal(10, 6)
   metadata         Json?
+  // Assistant messages only: retrieval confidence (0-1, confidence.service.ts)
+  confidence       Float?
   createdAt        DateTime      @default(now())
   user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation     Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   document         Document?     @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  reviewQueue      ReviewQueue? // Set when the answer was escalated for human review
 
   @@index([userId, createdAt])
   @@index([conversationId, createdAt])
@@ -223,4 +228,52 @@ model AIAuditLog {
   @@index([userId, createdAt])
   @@index([taskType, createdAt])
   @@index([model, createdAt])
+}
+
+// Human-in-the-loop review queue: low-confidence answers wait here for a
+// reviewer (review-queue.service.ts). One item per assistant message; the
+// answer stays hidden from the user until it's APPROVED.
+model ReviewQueue {
+  id              String         @id @default(cuid())
+  messageId       String         @unique
+  // Optional: a chat question can search all of the user's documents
+  documentId      String?
+  question        String
+  generatedAnswer String         @db.Text
+  confidence      Float
+  sources         Json // Citations the answer was based on
+  reason          String?
+  status          ReviewStatus   @default(PENDING)
+  priority        ReviewPriority @default(NORMAL)
+  reviewedBy      String?
+  editedAnswer    String?        @db.Text // Reviewer's corrected answer, if edited
+  reviewerNotes   String?        @db.Text
+  reviewedAt      DateTime?
+  escalatedAt     DateTime?
+  slaDeadline     DateTime // createdAt + HITL_SLA_MINUTES
+  createdAt       DateTime       @default(now())
+  // Deleting the message deletes its review; deleting the document or the
+  // reviewer keeps the review record and just clears the link
+  message         Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  document        Document?      @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  reviewer        User?          @relation(fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  @@index([status, priority, createdAt]) // Reviewer queue order
+  @@index([reviewedBy])
+  @@index([slaDeadline]) // Finding items past their SLA
+}
+
+enum ReviewStatus {
+  PENDING
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  ESCALATED
+}
+
+enum ReviewPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
 }

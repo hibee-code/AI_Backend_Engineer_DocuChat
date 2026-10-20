@@ -78,5 +78,26 @@ export const mcpToolDuration = new client.Histogram({
   buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
 });
 
+// Histogram: retrieval confidence of chat answers (confidence.service.ts)
+export const ragConfidence = new client.Histogram({
+  name: 'docuchat_rag_confidence',
+  help: 'Retrieval confidence score of chat answers (0-1)',
+  buckets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 1],
+});
+
+// Counter: what happened to answers below the HITL threshold
+export const hitlEscalations = new client.Counter({
+  name: 'docuchat_hitl_escalations_total',
+  help: 'Low-confidence chat answers, by outcome',
+  labelNames: ['outcome'], // queued | queue_full | disabled
+});
+
+// Counter: review SLA events from the escalation checker job
+export const hitlSlaEvents = new client.Counter({
+  name: 'docuchat_hitl_sla_events_total',
+  help: 'Review SLA events',
+  labelNames: ['event'], // escalated (deadline near) | breached (deadline passed)
+});
+
 // Export the registry for the /metrics endpoint
 export const metricsRegistry = client.register;

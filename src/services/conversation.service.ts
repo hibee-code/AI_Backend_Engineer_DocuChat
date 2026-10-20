@@ -1,14 +1,34 @@
+import { config } from '../config';
+import type { Prisma } from '../generated/prisma/client';
 import { prisma } from '../lib/prisma';
 import { logger } from '../lib/logger';
+import { ragConfidence } from '../lib/metrics';
 import { detectPromptInjection } from '../lib/promptSanitizer';
 import { AppError } from '../middleware/error-handler';
 import { semanticSearch } from './search.service';
 import { assembleContext, generateRAGResponse } from './rag.service';
+import { computeConfidence } from './confidence.service';
+import { reviewQueueService } from './review-queue.service';
 
 // Messages of earlier conversation sent to the LLM (last 5 Q&A pairs)
 const HISTORY_LIMIT = 10;
 
 const DEFAULT_TITLE = 'New conversation';
+
+const UNDER_REVIEW_TEXT =
+  'This answer is being reviewed for accuracy. You will be notified when the review is complete.';
+const REJECTED_TEXT = 'This answer was withheld after review.';
+
+// Messages the user (and the LLM history) may see: no review needed, review
+// APPROVED, or ESCALATED (SLA passed, delivered with a disclaimer by the
+// escalation checker job). Answers still in review, or rejected, stay hidden.
+const SHOWN_REVIEW_STATUSES = ['APPROVED', 'ESCALATED'] as const;
+const VISIBLE_MESSAGES: Prisma.MessageWhereInput = {
+  OR: [
+    { reviewQueue: { is: null } },
+    { reviewQueue: { is: { status: { in: [...SHOWN_REVIEW_STATUSES] } } } },
+  ],
+};
 
 export async function createConversation(data: {
   userId: string;
@@ -16,9 +36,7 @@ export async function createConversation(data: {
   documentId?: string;
 }) {
   // A conversation about one document defaults to that document's title
-  const document = data.documentId
-    ? await getOwnedDocument(data.userId, data.documentId)
-    : null;
+  const document = data.documentId ? await getOwnedDocument(data.userId, data.documentId) : null;
 
   return prisma.conversation.create({
     data: {
@@ -37,9 +55,25 @@ export function listConversations(userId: string) {
 
 export async function listMessages(userId: string, conversationId: string) {
   await getOwnedConversation(userId, conversationId);
-  return prisma.message.findMany({
+  const messages = await prisma.message.findMany({
     where: { conversationId },
     orderBy: { createdAt: 'asc' },
+    include: { reviewQueue: { select: { status: true } } },
+  });
+
+  // Unreviewed and rejected answers keep their place in the thread, but their
+  // text (and citations) aren't shown
+  return messages.map(({ reviewQueue, ...m }) => {
+    const reviewStatus = reviewQueue?.status ?? null;
+    if (reviewStatus === null || reviewStatus === 'APPROVED' || reviewStatus === 'ESCALATED') {
+      return { ...m, reviewStatus };
+    }
+    return {
+      ...m,
+      reviewStatus,
+      content: reviewStatus === 'REJECTED' ? REJECTED_TEXT : UNDER_REVIEW_TEXT,
+      metadata: null,
+    };
   });
 }
 
@@ -67,8 +101,9 @@ export async function sendMessage(data: {
 
   // 2. Load recent conversation history. Done before saving the new message,
   //    which generateRAGResponse adds itself (with the retrieved context).
+  //    Unreviewed/rejected answers are left out: they must not shape later answers.
   const history = await prisma.message.findMany({
-    where: { conversationId: data.conversationId },
+    where: { conversationId: data.conversationId, ...VISIBLE_MESSAGES },
     orderBy: { createdAt: 'desc' },
     take: HISTORY_LIMIT,
     select: { role: true, content: true },
@@ -98,6 +133,10 @@ export async function sendMessage(data: {
   // 5. RAG: Augment
   const context = assembleContext(searchResults);
 
+  // 5b. Confidence from the chunks the answer will be based on
+  const confidence = computeConfidence(context.chunks, config.hitl.confidenceThreshold);
+  ragConfidence.observe(confidence.score);
+
   // 6. RAG: Generate
   const ragResponse = await generateRAGResponse({
     question: content,
@@ -108,11 +147,18 @@ export async function sendMessage(data: {
     correlationId: data.correlationId,
   });
 
-  // 7. Save assistant message with metadata, and 8. touch conversation updatedAt.
-  //    Only these two writes share a transaction: wrapping the LLM call in one
+  // 6b. Route on confidence. The LLM is called regardless: reviewers need the
+  //     answer to judge it. Escalated answers are hidden until reviewed.
+  const escalate = await reviewQueueService.shouldEscalate(confidence, {
+    correlationId: data.correlationId,
+    conversationId: data.conversationId,
+  });
+
+  // 7. Save assistant message (and its review item), and 8. touch conversation
+  //    updatedAt. Only these writes share a transaction: wrapping the LLM call
   //    would hold a database connection open for the whole (multi-second) call.
-  const [assistantMessage] = await prisma.$transaction([
-    prisma.message.create({
+  const assistantMessage = await prisma.$transaction(async (tx) => {
+    const message = await tx.message.create({
       data: {
         userId: data.userId,
         conversationId: data.conversationId,
@@ -122,24 +168,61 @@ export async function sendMessage(data: {
         promptTokens: ragResponse.tokensUsed.prompt,
         completionTokens: ragResponse.tokensUsed.completion,
         costUsd: ragResponse.costUsd,
+        confidence: confidence.score,
         metadata: {
           model: ragResponse.model,
           citations: ragResponse.citations,
           contextChunks: context.chunks.length,
+          confidenceLevel: confidence.level,
         },
       },
-    }),
-    prisma.conversation.update({
+    });
+
+    if (escalate) {
+      await reviewQueueService.enqueue(tx, {
+        messageId: message.id,
+        documentId: data.documentId,
+        question: content,
+        generatedAnswer: ragResponse.answer,
+        confidence: confidence.score,
+        sources: ragResponse.citations,
+        reason: confidence.reason,
+        correlationId: data.correlationId,
+      });
+    }
+
+    await tx.conversation.update({
       where: { id: data.conversationId },
       data: { updatedAt: new Date() },
-    }),
-  ]);
+    });
+    return message;
+  });
 
+  // Escalated: the answer is withheld until a reviewer approves it
+  if (escalate) {
+    return {
+      status: 'under_review' as const,
+      userMessage,
+      messageId: assistantMessage.id,
+      message: UNDER_REVIEW_TEXT,
+      confidence: confidence.score,
+      conversationId: data.conversationId,
+    };
+  }
+
+  // Confident enough (or review not possible) — return directly
   return {
+    status: 'answered' as const,
     userMessage,
     assistantMessage: {
       ...assistantMessage,
       citations: ragResponse.citations,
+    },
+    confidence: {
+      score: confidence.score,
+      level: confidence.level,
+      // Set when it should have been reviewed but wasn't (disabled or queue full)
+      warning: confidence.shouldEscalate ? confidence.reason : undefined,
     },
   };
 }
